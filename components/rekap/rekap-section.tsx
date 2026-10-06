@@ -19,7 +19,10 @@ import { Badge, Button, Field, GlassCard, SectionTitle, SelectInput, StatCard } 
 import { useCollection } from '@/lib/store'
 import {
   BULAN,
+  JENIS_PEMERIKSAAN,
   PLASMODIUM,
+  normalizeSediaan,
+  plasmodiumLabel,
   STORAGE_KEYS,
   TAHUN,
   ASAL_ENDEMIS,
@@ -98,7 +101,7 @@ export function RekapSection() {
 
   const data = useMemo(() => {
     const migran = migranAll.filter((r) => isInMonth(r.tglDatang, bulan, tahun))
-    const sediaan = sediaanAll.filter((r) => isInMonth(r.tglPengambilan, bulan, tahun))
+    const sediaan = sediaanAll.map(normalizeSediaan).filter((r) => isInMonth(r.tglPemeriksaan, bulan, tahun))
     const jentik = jentikAll.filter((r) => isInMonth(r.tanggal, bulan, tahun))
     const parameter = parameterAll.filter((r) => isInMonth(r.tanggal, bulan, tahun))
     const lingkungan = lingkunganAll.filter((r) => isInMonth(r.tanggal, bulan, tahun))
@@ -113,6 +116,11 @@ export function RekapSection() {
       positif: positif.length,
       negatif: sediaan.length - positif.length,
       plasmodium: PLASMODIUM.map((p) => ({ jenis: p, jumlah: positif.filter((s) => s.plasmodium === p).length })),
+      perJenis: JENIS_PEMERIKSAAN.map((jenis) => {
+        const rows = sediaan.filter((s) => s.jenisPemeriksaan === jenis)
+        const pos = rows.filter((s) => s.hasil === 'Positif').length
+        return { jenis, total: rows.length, positif: pos, negatif: rows.length - pos }
+      }),
       asal: ASAL_ENDEMIS.map((a) => ({ asal: a, jumlah: migran.filter((m) => m.asal === a).length })),
       totalLagoon: lagoons.size,
       totalJentik: jentik.reduce((sum, j) => sum + totalLagoon(j.titik), 0),
@@ -141,8 +149,22 @@ export function RekapSection() {
       body: data.migran.map((m, i): Cell[] => [i + 1, m.nik, m.nama, m.umur, m.jk, m.asal, formatTanggal(m.tglDatang), m.alamatBanjar]),
     },
     sediaan: {
-      head: ['No', 'Nama', 'Tgl Ambil', 'Jenis', 'Hasil', 'Plasmodium'],
-      body: data.sediaan.map((s, i): Cell[] => [i + 1, s.nama, formatTanggal(s.tglPengambilan), s.jenisSediaan, s.hasil, s.hasil === 'Positif' ? s.plasmodium : '-']),
+      head: ['No', 'Nama', 'Umur', 'JK', 'Tgl Periksa', 'Jenis Pemeriksaan', 'Hasil', 'Plasmodium', 'Petugas'],
+      body: data.sediaan.map((s, i): Cell[] => [
+        i + 1,
+        s.nama,
+        s.umur,
+        s.jk,
+        formatTanggal(s.tglPemeriksaan),
+        s.jenisPemeriksaan,
+        s.hasil,
+        plasmodiumLabel(s),
+        s.petugas || '-',
+      ]),
+    },
+    perJenis: {
+      head: ['Jenis Pemeriksaan', 'Total', 'Positif', 'Negatif'],
+      body: data.perJenis.map((j): Cell[] => [j.jenis, j.total, j.positif, j.negatif]),
     },
     jentik: {
       head: ['No', 'Lagoon', 'Tanggal', 'T1', 'T2', 'T3', 'T4', 'Total', 'Kepadatan'],
@@ -177,9 +199,13 @@ export function RekapSection() {
 
   const summary = [
     { label: 'Total Survei Migran', value: data.migran.length },
-    { label: 'Total Sediaan Darah', value: data.sediaan.length },
-    { label: 'Sediaan Positif', value: data.positif },
-    { label: 'Sediaan Negatif', value: data.negatif },
+    { label: 'Total Pemeriksaan Sediaan Darah', value: data.sediaan.length },
+    ...data.perJenis.flatMap((j) => [
+      { label: `  - ${j.jenis}: Total`, value: j.total },
+      { label: `  - ${j.jenis}: Positif`, value: j.positif },
+    ]),
+    { label: 'Hasil Positif', value: data.positif },
+    { label: 'Hasil Negatif', value: data.negatif },
     ...data.plasmodium.map((p) => ({ label: `  - P. ${p.jenis}`, value: p.jumlah })),
     { label: 'Total Lagoon Disurvei', value: data.totalLagoon },
     { label: 'Survei Pemantauan Jentik', value: data.jentik.length },
@@ -214,7 +240,8 @@ export function RekapSection() {
     try {
       const sections: PdfSection[] = [
         { title: '1. Survei Migran', ...tables.migran },
-        { title: '2. Pengambilan Sediaan Darah', ...tables.sediaan },
+        { title: '2. Pengambilan Sediaan Darah - Per Jenis Pemeriksaan', ...tables.perJenis },
+        { title: '2. Pengambilan Sediaan Darah - Daftar', ...tables.sediaan },
         { title: '3a. Vektor Lagoon - Pemantauan Jentik', ...tables.jentik },
         { title: '3b. Vektor Lagoon - Parameter Air', ...tables.parameter },
         { title: '3b. Rata-rata Parameter Air', head: ['pH', 'Suhu (°C)', 'Salinitas (ppt)', 'Kekeruhan (NTU)', 'DO (mg/L)', 'Kedalaman (cm)'], body: avgParamRows },
@@ -233,6 +260,7 @@ export function RekapSection() {
       await exportExcel(fileBase, [
         { name: 'Ringkasan', head: ['Indikator', 'Nilai'], body: summary.map((s) => [s.label.trim(), s.value]) },
         { name: 'Survei Migran', ...tables.migran },
+        { name: 'Sediaan Per Jenis', ...tables.perJenis },
         { name: 'Sediaan Darah', ...tables.sediaan },
         { name: 'Pemantauan Jentik', ...tables.jentik },
         { name: 'Parameter Air', ...tables.parameter },
@@ -308,23 +336,42 @@ export function RekapSection() {
 
         <GlassCard>
           <SubHeading icon={<Droplets />} title="Pengambilan Sediaan Darah" count={data.sediaan.length} />
+          <div className="mb-3 grid grid-cols-2 gap-3">
+            {data.perJenis.map((j) => (
+              <div
+                key={j.jenis}
+                className={
+                  j.jenis === 'RDT'
+                    ? 'rounded-xl border border-blue-100 bg-blue-50/60 p-3'
+                    : 'rounded-xl border border-purple-100 bg-purple-50/60 p-3'
+                }
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <Badge tone={j.jenis === 'RDT' ? 'blue' : 'purple'}>{j.jenis}</Badge>
+                  <span className="text-xs text-muted-foreground">pemeriksaan</span>
+                </div>
+                <p className="mt-2 text-2xl font-bold tabular-nums text-foreground">{j.total}</p>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  <Badge tone="red">{`Positif ${j.positif}`}</Badge>
+                  <Badge tone="emerald">{`Negatif ${j.negatif}`}</Badge>
+                </div>
+              </div>
+            ))}
+          </div>
           <div className="mb-3 flex flex-wrap gap-2">
-            <Badge tone="red">{`Positif: ${data.positif}`}</Badge>
-            <Badge tone="emerald">{`Negatif: ${data.negatif}`}</Badge>
             {data.plasmodium.map((p) => (
               <Badge key={p.jenis} tone="slate">{`P. ${p.jenis}: ${p.jumlah}`}</Badge>
             ))}
           </div>
           <MiniTable
-            head={['No', 'Nama', 'Tgl', 'Jenis', 'Hasil']}
+            head={['No', 'Nama', 'Tgl', 'Jenis', 'Hasil', 'Plasmodium']}
             body={data.sediaan.map((s, i) => [
               i + 1,
               <span key="n" className="font-semibold">{s.nama}</span>,
-              formatTanggal(s.tglPengambilan),
-              s.jenisSediaan,
-              <Badge key="h" tone={s.hasil === 'Positif' ? 'red' : 'emerald'}>
-                {s.hasil === 'Positif' ? `Positif (${s.plasmodium})` : 'Negatif'}
-              </Badge>,
+              formatTanggal(s.tglPemeriksaan),
+              <Badge key="j" tone={s.jenisPemeriksaan === 'RDT' ? 'blue' : 'purple'}>{s.jenisPemeriksaan}</Badge>,
+              <Badge key="h" tone={s.hasil === 'Positif' ? 'red' : 'emerald'}>{s.hasil}</Badge>,
+              plasmodiumLabel(s),
             ])}
           />
         </GlassCard>

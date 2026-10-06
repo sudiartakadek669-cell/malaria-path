@@ -2,12 +2,25 @@
 
 import { useState, type FormEvent } from 'react'
 import { Save, Lock } from 'lucide-react'
-import { ChoiceGroup, Field, FormActions, SelectInput, inputClass } from '../kit'
-import { HASIL, JENIS_SEDIAAN, PLASMODIUM, type Migran, type Sediaan } from '@/lib/types'
+import { Field, FormActions, SelectInput, inputClass } from '../kit'
+import {
+  HASIL,
+  JENIS_PEMERIKSAAN,
+  PLASMODIUM,
+  type Hasil,
+  type JenisPemeriksaan,
+  type Migran,
+  type Sediaan,
+} from '@/lib/types'
 import type { NewRecord } from '@/lib/store'
 import { today } from '@/lib/format'
 
-type FormState = NewRecord<Sediaan>
+type SediaanInput = NewRecord<Sediaan>
+type FormState = Omit<SediaanInput, 'jenisPemeriksaan' | 'hasil'> & {
+  jenisPemeriksaan: JenisPemeriksaan | ''
+  hasil: Hasil | ''
+}
+type Errors = Partial<Record<'migran' | 'tgl' | 'jenis' | 'hasil', string>>
 
 const blank = (): FormState => ({
   migranId: '',
@@ -15,10 +28,11 @@ const blank = (): FormState => ({
   nama: '',
   umur: 0,
   jk: '',
-  tglPengambilan: today(),
-  jenisSediaan: 'RDT',
-  hasil: 'Negatif',
-  plasmodium: '-',
+  tglPemeriksaan: today(),
+  jenisPemeriksaan: '',
+  hasil: '',
+  plasmodium: '',
+  petugas: '',
 })
 
 export function SediaanForm({
@@ -30,12 +44,16 @@ export function SediaanForm({
 }: {
   migran: Migran[]
   initial?: Sediaan
-  onSubmit: (data: FormState) => void
+  onSubmit: (data: SediaanInput) => void
   onCancel?: () => void
   submitLabel?: string
 }) {
-  const [form, setForm] = useState<FormState>(() => (initial ? { ...initial } : blank()))
-  const [error, setError] = useState('')
+  const [form, setForm] = useState<FormState>(() => {
+    if (!initial) return blank()
+    const { id: _id, createdAt: _c, ...rest } = initial
+    return rest
+  })
+  const [errors, setErrors] = useState<Errors>({})
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((f) => ({ ...f, [key]: value }))
@@ -43,22 +61,30 @@ export function SediaanForm({
   const selectMigran = (id: string) => {
     const m = migran.find((x) => x.id === id)
     if (!m) return
-    setError('')
+    setErrors((e) => ({ ...e, migran: undefined }))
     setForm((f) => ({ ...f, migranId: m.id, nik: m.nik, nama: m.nama, umur: m.umur, jk: m.jk }))
   }
 
-  const setHasil = (hasil: string) =>
-    setForm((f) => ({
-      ...f,
-      hasil: hasil as FormState['hasil'],
-      plasmodium: hasil === 'Positif' ? (f.plasmodium === '-' ? 'Falciparum' : f.plasmodium) : '-',
-    }))
+  const setHasil = (hasil: string) => {
+    setErrors((e) => ({ ...e, hasil: undefined }))
+    setForm((f) => ({ ...f, hasil: hasil as Hasil, plasmodium: hasil === 'Positif' ? f.plasmodium : '' }))
+  }
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault()
-    if (!form.migranId) return setError('Pilih migran terlebih dahulu')
-    if (!form.tglPengambilan) return setError('Tanggal pengambilan wajib diisi')
-    onSubmit(form)
+    const next: Errors = {}
+    if (!form.migranId) next.migran = 'Pilih migran terlebih dahulu'
+    if (!form.tglPemeriksaan) next.tgl = 'Tanggal pemeriksaan wajib diisi'
+    if (!form.jenisPemeriksaan) next.jenis = 'Pilih jenis pemeriksaan'
+    if (!form.hasil) next.hasil = 'Pilih hasil pemeriksaan'
+    setErrors(next)
+    if (Object.keys(next).length) return
+    onSubmit({
+      ...form,
+      jenisPemeriksaan: form.jenisPemeriksaan as JenisPemeriksaan,
+      hasil: form.hasil as Hasil,
+      petugas: form.petugas.trim(),
+    })
     if (!initial) setForm(blank())
   }
 
@@ -72,7 +98,7 @@ export function SediaanForm({
           label="Pilih Migran (dari Survei Migran)"
           htmlFor={`${p}-migran`}
           className="sm:col-span-2 lg:col-span-3"
-          error={error}
+          error={errors.migran}
           hint={migran.length === 0 ? 'Belum ada data migran. Isi Menu Survei Migran terlebih dahulu.' : undefined}
         >
           <SelectInput
@@ -101,38 +127,59 @@ export function SediaanForm({
           </Field>
         ))}
 
-        <Field label="Tanggal Pengambilan" htmlFor={`${p}-tgl`}>
+        <Field label="Tanggal Pemeriksaan" htmlFor={`${p}-tgl`} error={errors.tgl}>
           <input
             id={`${p}-tgl`}
             type="date"
-            value={form.tglPengambilan}
-            onChange={(e) => set('tglPengambilan', e.target.value)}
+            required
+            value={form.tglPemeriksaan}
+            onChange={(e) => set('tglPemeriksaan', e.target.value)}
             className={inputClass}
           />
         </Field>
-        <Field label="Jenis Sediaan" htmlFor={`${p}-jenis`}>
+        <Field label="Jenis Pemeriksaan *" htmlFor={`${p}-jenis`} error={errors.jenis}>
           <SelectInput
             id={`${p}-jenis`}
-            value={form.jenisSediaan}
-            onChange={(v) => set('jenisSediaan', v as FormState['jenisSediaan'])}
-            options={JENIS_SEDIAAN}
+            value={form.jenisPemeriksaan}
+            onChange={(v) => {
+              setErrors((e) => ({ ...e, jenis: undefined }))
+              set('jenisPemeriksaan', v as JenisPemeriksaan)
+            }}
+            options={JENIS_PEMERIKSAAN}
+            placeholder="-- Pilih jenis --"
           />
         </Field>
-        <Field label="Hasil Pemeriksaan">
-          <ChoiceGroup label="Hasil Pemeriksaan" value={form.hasil} onChange={setHasil} options={HASIL} />
+        <Field label="Hasil Pemeriksaan *" htmlFor={`${p}-hasil`} error={errors.hasil}>
+          <SelectInput
+            id={`${p}-hasil`}
+            value={form.hasil}
+            onChange={setHasil}
+            options={HASIL}
+            placeholder="-- Pilih hasil --"
+          />
         </Field>
         <Field
-          label="Jenis Plasmodium"
+          label="Jenis Plasmodium (opsional)"
           htmlFor={`${p}-plas`}
-          hint={form.hasil === 'Negatif' ? 'Hanya diisi bila hasil positif' : undefined}
+          hint={form.hasil !== 'Positif' ? 'Aktif bila hasil positif' : undefined}
         >
           <SelectInput
             id={`${p}-plas`}
             value={form.hasil === 'Positif' ? form.plasmodium : ''}
             onChange={(v) => set('plasmodium', v)}
             options={PLASMODIUM}
-            placeholder="-"
-            disabled={form.hasil === 'Negatif'}
+            placeholder="- Tidak diketahui -"
+            disabled={form.hasil !== 'Positif'}
+          />
+        </Field>
+        <Field label="Petugas" htmlFor={`${p}-petugas`} className="sm:col-span-2 lg:col-span-1">
+          <input
+            id={`${p}-petugas`}
+            value={form.petugas}
+            onChange={(e) => set('petugas', e.target.value)}
+            placeholder="Nama petugas pemeriksa"
+            autoComplete="name"
+            className={inputClass}
           />
         </Field>
       </div>

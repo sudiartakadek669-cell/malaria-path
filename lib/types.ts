@@ -5,9 +5,11 @@ export interface BaseRecord {
 
 export const JENIS_KELAMIN = ['Laki-laki', 'Perempuan'] as const
 export const ASAL_ENDEMIS = ['Papua', 'NTT', 'Maluku', 'Kalimantan'] as const
-export const JENIS_SEDIAAN = ['RDT', 'Tetes Tebal', 'Tetes Tipis', 'RDT + Mikroskopis'] as const
-export const HASIL = ['Positif', 'Negatif'] as const
-export const PLASMODIUM = ['Falciparum', 'Vivax', 'Mix'] as const
+export const JENIS_PEMERIKSAAN = ['RDT', 'Mikroskopis'] as const
+export const HASIL = ['Negatif', 'Positif'] as const
+export const PLASMODIUM = ['Falciparum', 'Vivax', 'Mix', 'Malariae'] as const
+export type JenisPemeriksaan = (typeof JENIS_PEMERIKSAAN)[number]
+export type Hasil = (typeof HASIL)[number]
 export const VEGETASI = ['Mangrove Lebat', 'Mangrove Jarang', 'Enceng Gondok'] as const
 export const SAMPAH = ['Bersih', 'Plastik'] as const
 export const AKSES = ['Mudah', 'Sulit', 'Perahu'] as const
@@ -30,11 +32,29 @@ export interface Sediaan extends BaseRecord {
   nama: string
   umur: number
   jk: string
-  tglPengambilan: string
-  jenisSediaan: (typeof JENIS_SEDIAAN)[number]
-  hasil: (typeof HASIL)[number]
+  tglPemeriksaan: string
+  jenisPemeriksaan: JenisPemeriksaan
+  hasil: Hasil
   plasmodium: string
+  petugas: string
 }
+
+type LegacySediaan = Partial<Sediaan> & { tglPengambilan?: string; jenisSediaan?: string }
+
+/** Upgrades records saved before the RDT/Mikroskopis change so old localStorage data keeps working. */
+export function normalizeSediaan(raw: Sediaan): Sediaan {
+  const r = raw as LegacySediaan & Sediaan
+  return {
+    ...r,
+    tglPemeriksaan: r.tglPemeriksaan ?? r.tglPengambilan ?? '',
+    jenisPemeriksaan: r.jenisPemeriksaan ?? (r.jenisSediaan === 'RDT' ? 'RDT' : 'Mikroskopis'),
+    plasmodium: r.hasil === 'Positif' && r.plasmodium && r.plasmodium !== '-' ? r.plasmodium : '',
+    petugas: r.petugas ?? '',
+  }
+}
+
+export const plasmodiumLabel = (s: Pick<Sediaan, 'hasil' | 'plasmodium'>) =>
+  s.hasil === 'Positif' && s.plasmodium ? `P. ${s.plasmodium}` : '-'
 
 export interface Jentik extends BaseRecord {
   namaLagoon: string
